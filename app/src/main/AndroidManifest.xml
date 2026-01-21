@@ -1,0 +1,28 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.fallenangel.cheesymagisk">
+
+    <uses-sdk
+        android:minSdkVersion="26"
+        android:targetSdkVersion="33"/>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/cheesy"
+        android:roundIcon="@mipmap/cheesy_round"
+        android:label="Cheesy Magisk"
+        android:theme="@style/Theme.AppCompat.NoActionBar"
+        android:supportsRtl="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>
