@@ -224,7 +224,7 @@ if [ "$(getprop debug.magisk.frida)" = "1" ]; then
 fi
 
 FRIDADIR="/data/adb/modules/frida"
-CHEATDIR="/data/adb/modules/frida"
+CHEATDIR="/data/adb/modules/magisk-cheat-engine"
 
 if [ ! -d "$CHEATDIR" ] || [ -f "$CHEATDIR/remove" ]; then
   setprop persist.magisk.cheatengine 0
