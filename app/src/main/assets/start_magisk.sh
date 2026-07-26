@@ -14,4 +14,4 @@ fi
 # Now enter init namespace and run main setup
 export FIRST_STAGE=1
 export ASH_STANDALONE=1
-exec ./busybox setsid ./busybox nsenter -m/proc/1/ns/mnt "$PWD/busybox" sh "$PWD/pico_setup.sh" >/data/local/tmp/pico_magisk_start.txt 2>&1
+exec /data/local/tmp/busybox setsid /data/local/tmp/busybox nsenter -m/proc/1/ns/mnt "$PWD/busybox" sh "$PWD/pico_setup.sh" >/data/local/tmp/pico_magisk_start.txt 2>&1

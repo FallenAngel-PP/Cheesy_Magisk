@@ -23,6 +23,46 @@ mount_sbin() {
   chcon u:object_r:rootfs:s0 /sbin
 }
 
+publish_su_to_namespaces() {
+  echo "Publishing su through /system/xbin..."
+
+  SU_OVERLAY="/data/adb/magisk/.su_path"
+  mkdir -p "$SU_OVERLAY"
+  chmod 755 "$SU_OVERLAY"
+
+  if [ -d /system/xbin ]; then
+    cp -af /system/xbin/. "$SU_OVERLAY/" 2>/dev/null
+  fi
+
+  ln -sf "$MAGISKTMP/su" "$SU_OVERLAY/su"
+
+  echo "Mounting xbin overlay in current namespace..."
+  "$SCRIPT_DIR/busybox" mount -o bind "$SU_OVERLAY" /system/xbin || \
+    echo "WARNING: Could not mount xbin overlay in current namespace"
+
+  for ZPID in $(pidof zygote zygote32 zygote64 2>/dev/null); do
+    echo "Mounting xbin overlay in Zygote namespace PID $ZPID..."
+    "$SCRIPT_DIR/busybox" nsenter -t "$ZPID" -m -- \
+      "$SCRIPT_DIR/busybox" mount -o bind "$SU_OVERLAY" /system/xbin || \
+      echo "WARNING: Could not mount xbin overlay in Zygote PID $ZPID"
+  done
+
+  ADBD_PID="$(pidof adbd)"
+  if [ -n "$ADBD_PID" ]; then
+    echo "Mounting xbin overlay in adbd namespace PID $ADBD_PID..."
+    "$SCRIPT_DIR/busybox" nsenter -t "$ADBD_PID" -m -- \
+      "$SCRIPT_DIR/busybox" mount -o bind "$SU_OVERLAY" /system/xbin || \
+      echo "WARNING: Could not mount xbin overlay in adbd namespace"
+  fi
+
+  if [ -e /system/xbin/su ]; then
+    echo "Public su path:"
+    ls -la /system/xbin/su
+  else
+    echo "WARNING: /system/xbin/su is not visible in current namespace"
+  fi
+}
+
 if [ ! -f /system/build.prop ]; then
   echo 'Please run this script on the device!'
   exit 1
@@ -106,19 +146,11 @@ if $IS64BIT && [ -e "/system/bin/linker" ]; then
   chmod 755 magisk32
 fi
 
-echo "Running preinit..."
-MAKEDEV=1 $MAGISKTMP/magisk --preinit-device 2>&1
-
 # Stop zygote (and previous setup if exists)
 echo "Stopping system services..."
 magisk --stop 2>/dev/null
 
 # SELinux workaround - try both methods
-runcon u:r:init:s0 stop 2>/dev/null || {
-  echo "runcon failed, trying setenforce 0..."
-  setenforce 0
-  stop
-}
 
 if [ -d /debug_ramdisk ]; then
   umount -l /debug_ramdisk 2>/dev/null
@@ -248,15 +280,32 @@ cp -af ./magiskinit $MAGISKBIN/magiskinit 2>/dev/null
 cp -af ./busybox $MAGISKBIN/busybox
 
 # Create symlinks
-ln -s ./magisk $MAGISKTMP/su
-ln -s ./magisk $MAGISKTMP/resetprop
-ln -s ./magiskpolicy $MAGISKTMP/supolicy
+# Create symlinks in Magisk tmpfs
+ln -sf ./magisk "$MAGISKTMP/su"
+ln -sf ./magisk "$MAGISKTMP/resetprop"
+ln -sf ./magiskpolicy "$MAGISKTMP/supolicy"
+
+# Create aliases in /data/adb/magisk too
+ln -sf ./magisk "$MAGISKBIN/su"
+ln -sf ./magisk "$MAGISKBIN/resetprop"
+ln -sf ./magiskpolicy "$MAGISKBIN/supolicy"
+
+export MAGISKTMP
+export PATH="$MAGISKTMP:$MAGISKBIN:/system/bin:/system/xbin:$PATH"
+
+echo "Running preinit..."
+MAKEDEV=1 "$MAGISKTMP/magisk" --preinit-device
+echo "preinit exit: $?"
 
 # Setup Magisk tmpfs structure
 mkdir -p $MAGISKTMP/.magisk/device
 mkdir -p $MAGISKTMP/.magisk/worker
 mount_tmpfs $MAGISKTMP/.magisk/worker
-mount --make-private $MAGISKTMP/.magisk/worker
+WORKER="$MAGISKTMP/.magisk/worker"
+
+/system/bin/mount --make-private "$WORKER" 2>/dev/null || \
+/system/bin/toybox mount --make-private "$WORKER" 2>/dev/null || \
+echo "WARNING: Could not mark $WORKER private"
 touch $MAGISKTMP/.magisk/config
 
 export MAGISKTMP
@@ -279,13 +328,43 @@ fi
 
 # Boot up Magisk
 echo "Starting Magisk..."
-$MAGISKTMP/magisk --post-fs-data
-start
-$MAGISKTMP/magisk --service
 
-# Wait for zygote and complete boot
+echo "Running post-fs-data..."
+"$MAGISKTMP/magisk" --post-fs-data
+POST_FS_RC=$?
+echo "post-fs-data exit: $POST_FS_RC"
+
+echo "Starting Magisk service..."
+"$MAGISKTMP/magisk" --service
+SERVICE_RC=$?
+echo "service exit: $SERVICE_RC"
+
 sleep 2
-$MAGISKTMP/magisk --boot-complete
+
+echo "Completing Magisk boot..."
+"$MAGISKTMP/magisk" --boot-complete
+BOOT_RC=$?
+echo "boot-complete exit: $BOOT_RC"
+
+echo "Checking Magisk daemon..."
+ps -A -Z | grep -i '[m]agisk' || true
+
+echo "Testing su..."
+"$MAGISKTMP/su" -c id
+SU_RC=$?
+echo "su exit: $SU_RC"
+
+# Publish su before restarting Android framework. Newly started apps
+# inherit the /system/xbin overlay through Zygote.
+publish_su_to_namespaces
+
+echo "Testing public su..."
+if [ -x /system/xbin/su ]; then
+  /system/xbin/su -c id
+  echo "public su exit: $?"
+else
+  echo "public su exit: 127"
+fi
 
 # Cleanup tmp directory
 echo "Cleanup data/local/tmp"
@@ -305,9 +384,13 @@ rm -f \
   "$TMP/pico_setup.sh" \
   "$TMP/frida.zip" \
   "$TMP/cheat_engine.zip" \
+  "$TMP/resetprop" \
   "$TMP/stub.apk"
 
 echo "Cleanup done"
+
+setprop debug.magisk.preinit 2
+runcon u:r:init:s0 setprop sys.boot_completed 1 2>/dev/null || setprop sys.boot_completed 1
 
 echo ""
 echo "===== Magisk Setup Complete ====="
