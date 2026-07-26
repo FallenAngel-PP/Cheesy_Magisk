@@ -39,10 +39,6 @@ This project is primarily intended for **research, development, and advanced deb
 4. (Optional) Frida and/or Cheat Engine servers are installed as Magisk modules
 5. After a reboot, the process must be repeated
 
-Due to android's app limitations, you have to run the program twice.
-- On first run it sets selinux to permissive and restarts system-server
-- On second run it has permission to use 'mount' command and installs magisk
-
 ---
 
 ## 🧩 Optional Modules
